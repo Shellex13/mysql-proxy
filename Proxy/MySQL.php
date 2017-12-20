@@ -95,12 +95,12 @@ class MySQL {
             $ret = $this->protocol->getConnResult($data);
             if ($ret == 1) {
                 $db->status = "EST";
-                \Logger::log("连接mysql 成功 $ret");
+                \Logger::log("连接mysql 成功 $ret {$this->datasource}");
                 $this->join($db);
                 return;
             } else {
                 //随后mysql会主动断开连接 回调onclose
-                \Logger::log("连接mysql 失败 $ret");
+                \Logger::log("连接mysql 失败 $ret {$this->datasource}");
                 $binaryData = $this->protocol->packErrorData(self::ERROR_AUTH, "auth error when connect");
                 call_user_func($this->onResult, $binaryData, $db->clientFd);
             }
@@ -141,7 +141,7 @@ class MySQL {
             $this->usedSize--;
             $this->table->decr("table_key", $this->datasource);
         }
-        \Logger::log("something error {$db->errCode}");
+        \Logger::log("something error {$db->errCode} db:{$this->datasource}");
         $binaryData = $this->protocol->packErrorData(self::ERROR_QUERY, "something error {$db->errCode}");
         return call_user_func($this->onResult, $binaryData, $db->clientFd);
     }
@@ -170,7 +170,7 @@ class MySQL {
         $this->usedSize++;
         $this->table->incr("table_key", $this->datasource);
 
-        $db->connect($this->config['host'], $this->config['port']);
+        $db->connect($this->config['host'], $this->config['port'], 10);
     }
 
     public function query($data, $fd) {
