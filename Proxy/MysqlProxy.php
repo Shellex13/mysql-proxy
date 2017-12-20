@@ -74,6 +74,7 @@ class MysqlProxy {
             $conf = $config['master'];
             $dataSource = $conf['host'] . ":" . $conf['port'] . ":" . $dbname;
             $this->table->column($dataSource, \swoole_table::TYPE_INT, 4);
+            $this->table->column("request_num_" . $dbname, \swoole_table::TYPE_INT, 4);
             $arr[$dataSource] = 0;
             if (isset($config['slave'])) {
                 foreach ($config['slave'] as $sconfig) {
@@ -343,6 +344,7 @@ class MysqlProxy {
         $this->table->incr("table_key", "request_num");
         if ($this->clients[$fd]['status'] == self::CONNECT_SEND_AUTH) {
             $dbName = $this->protocol->getDbName($data);
+            $this->table->incr("table_key", "request_num_" . $dbName);
             if (!isset($this->targetConfig[$dbName])) {
                 \Logger::log("db $dbName can not find");
                 $binaryData = $this->protocol->packErrorData(10000, "db '$dbName' can not find in mysql proxy config");
@@ -362,6 +364,8 @@ class MysqlProxy {
             return;
         }
         if ($this->clients[$fd]['status'] == self::CONNECT_SEND_ESTA) {
+            $dbName = $this->clients[$fd]['dbName'];
+            $this->table->incr("table_key", "request_num_" . $dbName);
             $ret = $this->protocol->getSql($data);
             $cmd = $ret['cmd'];
             $sql = $ret['sql'];
@@ -379,7 +383,6 @@ class MysqlProxy {
                 return;
             }
 
-            $dbName = $this->clients[$fd]['dbName'];
             $pre = substr($sql, 0, 10);
             if (stristr($pre, "SET NAMES")) {
                 $binary = $this->protocol->packOkData(0, 0);
@@ -551,8 +554,13 @@ class MysqlProxy {
 
         $request_num = (int) $this->table->get("table_key", "request_num");
         $this->table->set("table_key", array("request_num" => 0));
-        
-        $this->redis->set("proxy_qps", $request_num / 3);
+        $this->redis->set("proxy_qps", $request_num / 3); //总的qps
+
+        foreach ($this->targetConfig as $dbname => $config) {
+            $request_num = (int) $this->table->get("table_key", "request_num_" . $dbname);
+            $this->table->set("table_key", array("request_num" . $dbname => 0));
+            $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
+        }
     }
 
     public function OnTask($serv, $task_id, $from_id, $data) {
