@@ -558,7 +558,7 @@ class MysqlProxy {
 
         foreach ($this->targetConfig as $dbname => $config) {
             $request_num = (int) $this->table->get("table_key", "request_num_" . $dbname);
-            $this->table->set("table_key", array("request_num" . $dbname => 0));
+            $this->table->set("table_key", array("request_num_" . $dbname => 0));
             $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
         }
     }
