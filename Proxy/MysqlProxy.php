@@ -122,8 +122,9 @@ class MysqlProxy {
         $array = \Yosymfony\Toml\Toml::Parse(__DIR__ . '/../config.toml');
         $common = $array['common'];
 
-        define("REDIS_SLOW", $common['redis_slow']);
-        define("REDIS_BIG", $common['redis_big']);
+        define("REDIS_SLOW", $common['redis_slow']); //todo remove this config
+        define("REDIS_BIG", $common['redis_big']); //todo remove this config
+        define("REDIS_WRONG_SQL", "sqlwrong");
 
         define("MYSQL_CONN_REDIS_KEY", $common['mysql_conn_redis_key']);
 
@@ -384,9 +385,13 @@ class MysqlProxy {
             }
 
             $pre = substr($sql, 0, 10);
-            if (stristr($pre, "SET NAMES")) {
+            if (stristr($pre, "SET ")) {
                 $binary = $this->protocol->packOkData(0, 0);
-                return $this->serv->send($fd, $binary);
+                $this->serv->send($fd, $binary);
+                if (!stristr($pre, "SET NAMES")) {//不支持的sql 打日志 抓出可能的动态改变session的错误sql
+                    $this->logWrongSql($sql, $fd, $dbName);
+                }
+                return;
             } elseif (stristr($pre, "select")) {
                 if (isset($this->targetConfig[$dbName]['slave'])) {
                     shuffle($this->targetConfig[$dbName]['slave_weight_array']);
@@ -409,6 +414,12 @@ class MysqlProxy {
             $this->clients[$fd]['datasource'] = $dataSource;
             $this->pool[$dataSource]->query($data, $fd);
         }
+    }
+
+    private function logWrongSql($sql, $fd, $dbName) {
+        $client_ip = $this->clients[$fd]['client_ip'];
+        \Logger::log("the wrong sql '{$sql}' ip '{$client_ip}' db '{$dbName}'");
+//        $this->serv->task($logData);
     }
 
     public function OnResult($binaryData, $fd) {
