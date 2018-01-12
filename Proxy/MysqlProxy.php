@@ -384,10 +384,10 @@ class MysqlProxy {
                 $this->serv->send($fd, $binary);
                 return;
             }
-            
+
             //todo remove
             $random = rand(0, 9);
-            if ($random % 5 == 0) {
+            if ($random == 9) {
                 \Logger::log("log every sql '{$sql}'");
             }
 
