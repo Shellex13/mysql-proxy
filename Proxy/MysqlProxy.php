@@ -371,9 +371,6 @@ class MysqlProxy {
             $cmd = $ret['cmd'];
             $sql = $ret['sql'];
 
-//todo remove
-            \Logger::log("log every sql '{$sql}'");
-
             if ($cmd !== self::COM_QUERY) {
                 if ($cmd === self::COM_PREPARE) {
                     $binary = $this->protocol->packErrorData(MySQL::ERROR_PREPARE, "proxy do not support remote prepare , (PDO example:set PDO::ATTR_EMULATE_PREPARES=true)");
@@ -386,6 +383,12 @@ class MysqlProxy {
                 $binary = $this->protocol->packOkData(0, 0);
                 $this->serv->send($fd, $binary);
                 return;
+            }
+            
+            //todo remove
+            $random = rand(0, 9);
+            if ($random % 5 == 0) {
+                \Logger::log("log every sql '{$sql}'");
             }
 
             $pre = substr($sql, 0, 10);
