@@ -370,6 +370,10 @@ class MysqlProxy {
             $ret = $this->protocol->getSql($data);
             $cmd = $ret['cmd'];
             $sql = $ret['sql'];
+
+//todo remove
+            \Logger::log("log every sql '{$sql}'");
+
             if ($cmd !== self::COM_QUERY) {
                 if ($cmd === self::COM_PREPARE) {
                     $binary = $this->protocol->packErrorData(MySQL::ERROR_PREPARE, "proxy do not support remote prepare , (PDO example:set PDO::ATTR_EMULATE_PREPARES=true)");
