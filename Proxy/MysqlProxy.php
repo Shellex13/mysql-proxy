@@ -385,12 +385,6 @@ class MysqlProxy {
                 return;
             }
 
-            //todo remove
-            $random = rand(0, 9);
-            if ($random == 9) {
-                \Logger::log("log every sql '{$sql}'");
-            }
-
             $pre = substr($sql, 0, 10);
             if (stristr($pre, "SET ")) {
                 $binary = $this->protocol->packOkData(0, 0);
@@ -440,6 +434,14 @@ class MysqlProxy {
             }
             if ($this->RECORD_QUERY) {
                 $end = microtime(true) * 1000;
+
+                //todo remove
+                $random = rand(0, 10);
+                if ($random == 9) {
+                    $use = $end - $this->clients[$fd]['start'];
+                    \Logger::log("log every time '{$use}'");
+                }
+
                 $logData = array(
                     'start' => $this->clients[$fd]['start'],
                     'size' => strlen($binaryData),
