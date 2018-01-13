@@ -435,12 +435,12 @@ class MysqlProxy {
             if ($this->RECORD_QUERY) {
                 $end = microtime(true) * 1000;
 
-                //todo remove
-                $random = rand(0, 10);
-                if ($random == 9) {
-                    $use = $end - $this->clients[$fd]['start'];
-                    \Logger::log("log every time '{$use}'");
-                }
+//                //todo remove
+//                $random = rand(0, 20);
+//                if ($random == 9) {
+//                    $use = $end - $this->clients[$fd]['start'];
+//                    \Logger::log("log every time '{$sql}'");
+//                }
 
                 $logData = array(
                     'start' => $this->clients[$fd]['start'],
