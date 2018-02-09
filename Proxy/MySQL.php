@@ -117,11 +117,17 @@ class MySQL {
                     }
                     break;
                 case self::RESP_OK:
-                    call_user_func($this->onResult, $data, $db->clientFd);
-                    if ($ret['in_tran'] === 0) {
-                        $this->release($db);
+                    //某些sql 'select app as c,count(id) as count,sum(is_used) as used from `msg_captcha_log1`  where add_time >= "1509465600" and add_time <= "1518191999" and ty
+//pe="1"  group by app  order by `msg_captcha_log1`.id desc' 会在第二次eof前返回一个ok包 why?
+                    if ($db->eofCnt == 1) {
+                        $db->buffer .= $data;
                     } else {
-                        $db->in_tran = 1;
+                        call_user_func($this->onResult, $data, $db->clientFd);
+                        if ($ret['in_tran'] === 0) {
+                            $this->release($db);
+                        } else {
+                            $db->in_tran = 1;
+                        }
                     }
                     break;
                 case self::RESP_ERROR:
