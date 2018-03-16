@@ -386,13 +386,9 @@ class MysqlProxy {
             }
 
             $pre = substr($sql, 0, 10);
-            if (stristr($pre, "SET ")) {
+            if (stristr($pre, "SET NAMES")) {
                 $binary = $this->protocol->packOkData(0, 0);
-                $this->serv->send($fd, $binary);
-                if (!stristr($pre, "SET NAMES") && !stristr($pre, "SET autocommit")) {//不支持的sql 打日志 抓出可能的动态改变session的错误sql
-                    $this->logWrongSql($sql, $fd, $dbName);
-                }
-                return;
+                return $this->serv->send($fd, $binary);
             } elseif (stristr($pre, "select")) {
                 if (isset($this->targetConfig[$dbName]['slave'])) {
                     shuffle($this->targetConfig[$dbName]['slave_weight_array']);
