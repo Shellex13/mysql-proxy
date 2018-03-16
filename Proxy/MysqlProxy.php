@@ -389,7 +389,7 @@ class MysqlProxy {
             if (stristr($pre, "SET ")) {
                 $binary = $this->protocol->packOkData(0, 0);
                 $this->serv->send($fd, $binary);
-                if (!stristr($pre, "SET NAMES")) {//不支持的sql 打日志 抓出可能的动态改变session的错误sql
+                if (!stristr($pre, "SET NAMES") && !stristr($pre, "SET autocommit")) {//不支持的sql 打日志 抓出可能的动态改变session的错误sql
                     $this->logWrongSql($sql, $fd, $dbName);
                 }
                 return;
