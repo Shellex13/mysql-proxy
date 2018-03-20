@@ -198,7 +198,7 @@ class MySQL {
             $this->connect($fd);
         } else {
             array_push($this->taskQueue, array('fd' => $fd, 'data' => $data));
-            \Logger::log("out of pool size ,check the slow query {$data}");
+            \Logger::log("out of pool size ,source:{$this->datasource}  query {$data}");
         }
     }
 
