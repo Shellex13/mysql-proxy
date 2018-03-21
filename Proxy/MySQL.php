@@ -181,6 +181,7 @@ class MySQL {
 
     public function query($data, $fd) {
         if (isset($this->fd2db[$fd])) {//已经分配了连接
+            MysqlProxy::$clients[$fd]['start'] = microtime(true) * 1000;
             $this->fd2db[$fd]->send($data);
             return;
         }
@@ -191,6 +192,7 @@ class MySQL {
             $db->clientFd = $fd; //当前连接服务于那个客户端fd
             $db->buffer = '';
             $db->eofCnt = 0;
+            MysqlProxy::$clients[$fd]['start'] = microtime(true) * 1000;
             $db->send($data); //发送数据到mysql
             return;
         } else if ($this->usedSize < $this->poolSize) {
@@ -222,6 +224,7 @@ class MySQL {
             $this->fd2db[$task['fd']] = $db;
             $db->buffer = '';
             $db->eofCnt = 0;
+            MysqlProxy::$clients[$task['fd']]['start'] = microtime(true) * 1000;
             $db->send($task['data']);
         }
     }

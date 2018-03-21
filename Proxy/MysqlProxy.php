@@ -65,7 +65,7 @@ class MysqlProxy {
     /**
      * @var array
      */
-    private $clients = [];
+    static $clients = [];
 
     private function createTable() {
         $this->table = new \swoole_table(1024);
@@ -106,7 +106,7 @@ class MysqlProxy {
         $this->createTable();
         $this->protocol = new \MysqlProtocol();
         $this->pool = array(); //mysql的池子
-        $this->clients = array(); //连到proxy的客户端
+        self::$clients = array(); //连到proxy的客户端
         $this->serv->on('receive', array($this, 'OnReceive'));
         $this->serv->on('connect', array($this, 'OnConnect'));
         $this->serv->on('close', array($this, 'OnClose'));
@@ -314,7 +314,7 @@ class MysqlProxy {
     private function checkClientIp($dbName, $fd) {
         if (isset($this->targetConfig[$dbName]['allow_ip'])) {
             $ipArr = $this->targetConfig[$dbName]['allow_ip'];
-            $clientIp = $this->clients[$fd]['client_ip'];
+            $clientIp = self::$clients[$fd]['client_ip'];
             foreach ($ipArr as $pattern) {
                 if ($this->checkTwoIp($clientIp, $pattern)) {
                     return true;
@@ -343,7 +343,7 @@ class MysqlProxy {
 
     public function OnReceive(\swoole_server $serv, $fd, $from_id, $data) {
         $this->table->incr("table_key", "request_num");
-        if ($this->clients[$fd]['status'] == self::CONNECT_SEND_AUTH) {
+        if (self::$clients[$fd]['status'] == self::CONNECT_SEND_AUTH) {
             $dbName = $this->protocol->getDbName($data);
             $this->table->incr("table_key", "request_num_" . $dbName);
             if (!isset($this->targetConfig[$dbName])) {
@@ -359,13 +359,13 @@ class MysqlProxy {
             }
 
             $this->protocol->sendConnectOk($serv, $fd);
-            $this->clients[$fd]['status'] = self::CONNECT_SEND_ESTA;
-            $this->clients[$fd]['dbName'] = $dbName;
-            //   $this->clients[$fd]['clientsAuthData'] = $data;
+            self::$clients[$fd]['status'] = self::CONNECT_SEND_ESTA;
+            self::$clients[$fd]['dbName'] = $dbName;
+            //   self::$clients[$fd]['clientsAuthData'] = $data;
             return;
         }
-        if ($this->clients[$fd]['status'] == self::CONNECT_SEND_ESTA) {
-            $dbName = $this->clients[$fd]['dbName'];
+        if (self::$clients[$fd]['status'] == self::CONNECT_SEND_ESTA) {
+            $dbName = self::$clients[$fd]['dbName'];
             $this->table->incr("table_key", "request_num_" . $dbName);
             $ret = $this->protocol->getSql($data);
             $cmd = $ret['cmd'];
@@ -406,15 +406,14 @@ class MysqlProxy {
                 $pool = new MySQL($config, $this->table, array($this, 'OnResult'));
                 $this->pool[$dataSource] = $pool;
             }
-            $this->clients[$fd]['start'] = microtime(true) * 1000;
-            $this->clients[$fd]['sql'] = $sql;
-            $this->clients[$fd]['datasource'] = $dataSource;
+            self::$clients[$fd]['sql'] = $sql;
+            self::$clients[$fd]['datasource'] = $dataSource;
             $this->pool[$dataSource]->query($data, $fd);
         }
     }
 
     private function logWrongSql($sql, $fd, $dbName) {
-        $client_ip = $this->clients[$fd]['client_ip'];
+        $client_ip = self::$clients[$fd]['client_ip'];
         \Logger::log("the wrong sql '{$sql}' ip '{$client_ip}' db '{$dbName}'");
 //        $this->serv->task($logData);
     }
@@ -423,7 +422,7 @@ class MysqlProxy {
         if ($fd == 0) {//ping的返回结果 todo 从库自动恢复 目前只维护连接
             echo "got\n";
         }
-        if (isset($this->clients[$fd])) {//有可能已经关闭了
+        if (isset(self::$clients[$fd])) {//有可能已经关闭了
             if (!$this->serv->send($fd, $binaryData)) {
                 $binary = $this->protocol->packErrorData(MySQL::ERROR_QUERY, "send to client failed,data size " . strlen($binaryData));
                 $this->serv->send($fd, $binary);
@@ -434,17 +433,17 @@ class MysqlProxy {
 //                //todo remove
 //                $random = rand(0, 20);
 //                if ($random == 9) {
-//                    $use = $end - $this->clients[$fd]['start'];
+//                    $use = $end - self::$clients[$fd]['start'];
 //                    \Logger::log("log every time '{$sql}'");
 //                }
 
                 $logData = array(
-                    'start' => $this->clients[$fd]['start'],
+                    'start' => self::$clients[$fd]['start'],
                     'size' => strlen($binaryData),
-                    'time' => $end - $this->clients[$fd]['start'],
-                    'sql' => $this->clients[$fd]['sql'],
-                    'datasource' => $this->clients[$fd]['datasource'],
-                    'client_ip' => $this->clients[$fd]['client_ip'],
+                    'time' => $end - self::$clients[$fd]['start'],
+                    'sql' => self::$clients[$fd]['sql'],
+                    'datasource' => self::$clients[$fd]['datasource'],
+                    'client_ip' => self::$clients[$fd]['client_ip'],
                 );
                 if ($logData['time'] > $this->slow_limit
                         or $logData['size'] > $this->big_limit) {
@@ -456,14 +455,14 @@ class MysqlProxy {
 
     public function OnConnect(\swoole_server $serv, $fd) {
 //        \Logger::log("client connect $fd");
-        $this->clients[$fd]['status'] = self::CONNECT_START;
+        self::$clients[$fd]['status'] = self::CONNECT_START;
         $this->protocol->sendConnectAuth($serv, $fd);
-        $this->clients[$fd]['status'] = self::CONNECT_SEND_AUTH;
+        self::$clients[$fd]['status'] = self::CONNECT_SEND_AUTH;
         $info = $serv->getClientInfo($fd);
         if ($info) {
-            $this->clients[$fd]['client_ip'] = $info['remote_ip'];
+            self::$clients[$fd]['client_ip'] = $info['remote_ip'];
         } else {
-            $this->clients[$fd]['client_ip'] = 0;
+            self::$clients[$fd]['client_ip'] = 0;
         }
         $this->table->incr("table_key", "client_count");
     }
@@ -473,10 +472,10 @@ class MysqlProxy {
         //todo del from client
         $this->table->decr("table_key", "client_count");
         //remove from task queue,if possible
-        if (isset($this->clients[$fd]['datasource'])) {
-            $this->pool[$this->clients[$fd]['datasource']]->removeTask($fd);
+        if (isset(self::$clients[$fd]['datasource'])) {
+            $this->pool[self::$clients[$fd]['datasource']]->removeTask($fd);
         }
-        unset($this->clients[$fd]);
+        unset(self::$clients[$fd]);
     }
 
 //    public function OnStart($serv)
