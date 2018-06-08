@@ -389,6 +389,9 @@ class MysqlProxy {
             if (stristr($pre, "SET NAMES")) {
                 $binary = $this->protocol->packOkData(0, 0);
                 return $this->serv->send($fd, $binary);
+            } else if (stristr($pre, "SET auto")) {
+                $binary = $this->protocol->packOkData(0, 0);
+                return $this->serv->send($fd, $binary);
             } elseif (stristr($pre, "select")) {
                 if (isset($this->targetConfig[$dbName]['slave'])) {
                     shuffle($this->targetConfig[$dbName]['slave_weight_array']);
@@ -528,7 +531,7 @@ class MysqlProxy {
     private function connectRedis() {
         if (empty($this->redis)) {
             $client = new \redis;
-            if ($client->pconnect($this->redisHost, $this->redisPort)) {
+            if ($client->pconnect($this->redisHost, $this->redisPort, 0.1)) {
                 //判断是否设置密码
                 if (!empty($this->redisAuth)) {
                     $client->auth($this->redisAuth);
