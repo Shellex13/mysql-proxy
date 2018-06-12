@@ -73,13 +73,16 @@ class MySQL {
         $this->protocol = new \MysqlProtocol();
     }
 
-    public function onClose($db) {//mysql主动断开了和proxy的链接
+    /*
+     * Server端关闭或Client端主动关闭，都会触发onClose事件
+     */
+    public function onClose($db) {
         \Logger::log("close with mysql {$this->datasource}");
 
         $this->usedSize--;
         $this->table->decr("table_key", $this->datasource);
 
-        //如果此链接在idle里面就剔除
+        //如果此mysql链接在idlePool里面就剔除
         foreach ($this->idlePool as $k => $res) {
             if ($res === $db) {
                 unset($this->idlePool[$k]);
@@ -87,12 +90,11 @@ class MySQL {
             }
         }
 
-        //如果不在idel里面(此链接已经分配给了客户端clietfd>0),则向客户端发送错误信息(重启mysql才会发生这种情况，session timeout的时候除非分配连接和gone away同时发生)
-        if ($db->clientFd > 0) {
+        //如果不在idel里面
+        if ($db->clientFd > 0) {//此链接已经分配给了客户端clietfd>0,则向客户端发送错误信息
             $binaryData = $this->protocol->packErrorData(self::ERROR_CONN, "close with mysql");
             return call_user_func($this->onResult, $binaryData, $db->clientFd);
-        } else {
-            \Logger::log("expect clientFd >0 {$this->datasource}");
+        } else {//proxy 主动close(removeTask) clientFd=0
         }
     }
 
@@ -198,7 +200,7 @@ class MySQL {
     }
 
     public function query($data, $fd) {
-        \Logger::log("size pool:{$this->usedSize} {$this->poolSize}");
+//        \Logger::log("size pool:{$this->usedSize} {$this->poolSize} $fd");
         if (isset($this->fd2db[$fd])) {//已经分配了连接
             MysqlProxy::$clients[$fd]['start'] = microtime(true) * 1000;
             $this->fd2db[$fd]->send($data);
@@ -263,28 +265,22 @@ class MySQL {
     }
 
     /**
-     * 移除排队和解除事务
+     * 客户端断开连接
      * @param $fd
      * @return bool
      */
     function removeTask($fd) {
         if (isset($this->fd2db[$fd])) {//客户端断开了连接 and 这个fd还持有连接
             $db = $this->fd2db[$fd];
-            if ($db->in_tran) {//在事务里面直接断开了和proxy的链接，相应的proxy也和mysql断开链接重新连
-                \Logger::log("client close when in transaction {$this->datasource}");
-                //clean $db
-                unset($this->fd2db[$db->clientFd]);
-                $db->clientFd = 0;
-                $db->buffer = '';
-                $db->eofCnt = 0;
-                $db->in_tran = 0;
-                $db->close();
-                //--size
-                $this->usedSize--;
-                $this->table->decr("table_key", $this->datasource);
-            } else {//再度利用
-                $this->release($db);
-            }
+            //断开了和proxy的链接,相应的proxy也和mysql断开链接重新连 因为有些业务依赖断开连接这个行为
+            \Logger::log("client close during  query {$this->datasource}");
+            //clean $db
+            unset($this->fd2db[$db->clientFd]);
+            $db->clientFd = 0;
+            $db->buffer = '';
+            $db->eofCnt = 0;
+            $db->in_tran = 0;
+            $db->close();
         } else {//客户端断开了连接 and 这个fd未持有连接 and 在队列中=>从等待队列中移除
             foreach ($this->taskQueue as $k => $arr) {
                 if ($arr['fd'] === $fd) {

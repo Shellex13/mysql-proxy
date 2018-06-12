@@ -216,6 +216,7 @@ class MysqlProxy {
                     throw new \Exception("the config format error $v");
             }
         }
+
         //charset  max_conn如果没设置走默认的
         if (!isset($dbArr['charset'])) {
             $dbArr['charset'] = $value['default_charset'];
