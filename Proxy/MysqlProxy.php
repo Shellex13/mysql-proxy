@@ -536,6 +536,7 @@ class MysqlProxy {
                 if (!empty($this->redisAuth)) {
                     $client->auth($this->redisAuth);
                 }
+                \Logger::log("connect redis success ");
                 $this->redis = $client;
             } else {
                 return false;
@@ -546,64 +547,70 @@ class MysqlProxy {
 
     //task callback 上报连接数 && 清理redis
     public function OnTaskTimer($serv) {
-        $count = $this->table->get("table_key");
-        if (!$this->connectRedis()) {
-            return;
-        }
-        /*
-         * count layout
-         *                                                hash
-         * 
-         *  datasource1      datasource2    datasource3   client_count(客户端链接)
-         *       ↓                           ↓                     ↓                    ↓
-         *       1                           1                     0                   10
-         * 
-         */
-        $ser = \swoole_serialize::pack($count);
-        $this->redis->hSet(MYSQL_CONN_REDIS_KEY, $this->localip, $ser);
-        $this->redis->expire(MYSQL_CONN_REDIS_KEY, 60);
+        try {
+            $this->connectRedis();
+            $count = $this->table->get("table_key");
+            /*
+             * count layout
+             *                                                hash
+             * 
+             *  datasource1      datasource2    datasource3   client_count(客户端链接)
+             *       ↓                           ↓                     ↓                    ↓
+             *       1                           1                     0                   10
+             * 
+             */
+            $ser = \swoole_serialize::pack($count);
+            $this->redis->hSet(MYSQL_CONN_REDIS_KEY, $this->localip, $ser);
+            $this->redis->expire(MYSQL_CONN_REDIS_KEY, 60);
 
-        $date = date("Y-m-d");
-        $total = $this->redis->zCard(REDIS_SLOW . $date);
-        if ($total > 100) {
-            $this->redis->zRemRangeByRank(REDIS_SLOW . $date, 0, -100); //删除排名100后的所有成员
-            $this->redis->zRemRangeByRank(REDIS_BIG . $date, 0, -100);
-        }
+            $date = date("Y-m-d");
+            $total = $this->redis->zCard(REDIS_SLOW . $date);
+            if ($total > 100) {
+                $this->redis->zRemRangeByRank(REDIS_SLOW . $date, 0, -100); //删除排名100后的所有成员
+                $this->redis->zRemRangeByRank(REDIS_BIG . $date, 0, -100);
+            }
 
-        $request_num = (int) $this->table->get("table_key", "request_num");
-        $this->table->set("table_key", array("request_num" => 0));
-        $this->redis->set("proxy_qps", $request_num / 3); //总的qps
+            $request_num = (int) $this->table->get("table_key", "request_num");
+            $this->table->set("table_key", array("request_num" => 0));
+            $this->redis->set("proxy_qps", $request_num / 3); //总的qps
 
-        foreach ($this->targetConfig as $dbname => $config) {
-            $request_num = (int) $this->table->get("table_key", "request_num_" . $dbname);
-            $this->table->set("table_key", array("request_num_" . $dbname => 0));
-            $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
+            foreach ($this->targetConfig as $dbname => $config) {
+                $request_num = (int) $this->table->get("table_key", "request_num_" . $dbname);
+                $this->table->set("table_key", array("request_num_" . $dbname => 0));
+                $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
+            }
+        } catch (\Exception $e) {
+            $this->redis = NULL;
+            \Logger::log("redis error " . $e->getMessage());
         }
     }
 
     public function OnTask($serv, $task_id, $from_id, $data) {
-        if (!$this->connectRedis()) {
-            return;
-        }
-        $date = date("Y-m-d");
-        $expireFlag = false;
-        if (!$this->redis->exists(REDIS_SLOW . $date)) {
-            $expireFlag = true;
-        }
-        $ser = \swoole_serialize::pack($data);
-        if ($data['size'] > $this->big_limit) {
-            $this->redis->zadd(REDIS_BIG . $date, $data['size'], $ser);
-        }
+        try {
+            $this->connectRedis();
+            $date = date("Y-m-d");
+            $expireFlag = false;
+            if (!$this->redis->exists(REDIS_SLOW . $date)) {
+                $expireFlag = true;
+            }
+            $ser = \swoole_serialize::pack($data);
+            if ($data['size'] > $this->big_limit) {
+                $this->redis->zadd(REDIS_BIG . $date, $data['size'], $ser);
+            }
 
-        if ($data['time'] > $this->slow_limit) {
-            $this->redis->zadd(REDIS_SLOW . $date, $data['time'], $ser);
-        }
+            if ($data['time'] > $this->slow_limit) {
+                $this->redis->zadd(REDIS_SLOW . $date, $data['time'], $ser);
+            }
 
 
-        if ($expireFlag) {
-            $this->redis->expireAt(REDIS_BIG . $date, strtotime(date("Y-m-d 23:59:59"))); //凌晨过期
-            $this->redis->expireAt(REDIS_SLOW . $date, strtotime(date("Y-m-d 23:59:59"))); //凌晨过期
-            // $this->redis->expireAt('sqllist' . $date, strtotime(date("Y-m-d 23:59:59")) - time()); //凌晨过期
+            if ($expireFlag) {
+                $this->redis->expireAt(REDIS_BIG . $date, strtotime(date("Y-m-d 23:59:59"))); //凌晨过期
+                $this->redis->expireAt(REDIS_SLOW . $date, strtotime(date("Y-m-d 23:59:59"))); //凌晨过期
+                // $this->redis->expireAt('sqllist' . $date, strtotime(date("Y-m-d 23:59:59")) - time()); //凌晨过期
+            }
+        } catch (\Exception $e) {
+            $this->redis = NULL;
+            \Logger::log("redis error " . $e->getMessage());
         }
     }
 
