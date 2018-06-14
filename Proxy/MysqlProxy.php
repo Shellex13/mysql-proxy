@@ -159,7 +159,7 @@ class MysqlProxy {
                 if (isset($value['big_limit'])) {
                     $this->big_limit = (int) $value['big_limit'];
                 }
-
+                
                 $this->RECORD_QUERY = $value['record_query'];
             } else {//nodes
 //                $node = $key;
@@ -487,6 +487,7 @@ class MysqlProxy {
 //    }
 
     public function OnWorkerStart(\swoole_server $serv, $worker_id) {
+        //for reload config
         $this->getConfigNode();
         if ($worker_id >= $serv->setting['worker_num']) {
             $serv->tick(3000, array($this, "OnTaskTimer"));

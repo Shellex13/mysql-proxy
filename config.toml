@@ -16,7 +16,7 @@ redis_big="sqlbig"
 mysql_conn_redis_key="proxy_connection"
 
 #swoole server通用配置信息
-worker_num=5
+worker_num=1
 #task 用于上报查询用
 task_worker_num=1
 #swoole server的 日志
@@ -27,8 +27,8 @@ port = 9536
 #是否守护进程方式运行
 daemon=false
 
-#子node配置文件
-#include_path = "/src/mysql-proxy/conf.d/"
+#子node配置文件,会加载这个路径下所有.toml后缀的文件
+include_path = "/src/mysql-proxy/nodes/"
 
 #慢日志阈值，超过这个数才记录 单位毫秒 不配置默认100ms
 slow_limit = 100
@@ -37,25 +37,27 @@ slow_limit = 100
 big_limit = 204800
 
 
-#mysql数据源配置
 
+
+#mysql数据源配置
 #'node1'名字可以随意改 每个node代表一组主从配置
 [node1]
         #主库实例配置
+#        master_host = "10.10.3.23:3306"
         master_host = "127.0.0.1:3306"
 
         #主库和从库用户名密码必须一致
         username = "root"
-        password= "xxxx"
+        password= "xxxxx"
 
-        #从库实例配置
-        slave_host = ["127.0.0.1:3306;weight=1","127.0.0.1:3306;weight=2"]
+        #从库实例配置.可以将主库的实例加到这里面
+        #slave_host = ["127.0.0.1:3306;weight=1","127.0.0.1:3306;weight=2"]
 
         #所有允许的数据库名,后面可以可选的配置每个db的charset和最大连接数，如果不配置走默认的
-        db = ["name=db1;charset=gbk","name=db2;max_conn=100","name=mysql"] 
+        db = ["name=test","name=db2;max_conn=100","name=mysql"] 
 
         #每个实例每个db默认的最大连接数
-        default_max_conn = 20
+        default_max_conn = 2
         #每个db默认的字符集
         default_charset = "utf8"
         #限制客户端ip 不配置就不限制

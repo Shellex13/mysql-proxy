@@ -1,0 +1,22 @@
+[node3]
+        #主库实例配置
+#        master_host = "10.10.3.23:3306"
+        master_host = "127.0.0.1:3306"
+
+        #主库和从库用户名密码必须一致
+        username = "root"
+        password= "xxxxxx"
+
+        #从库实例配置.可以将主库的实例加到这里面
+        #slave_host = ["127.0.0.1:3306;weight=1","127.0.0.1:3306;weight=2"]
+
+        #所有允许的数据库名,后面可以可选的配置每个db的charset和最大连接数，如果不配置走默认的
+        db = ["name=test3"] 
+
+        #每个实例每个db默认的最大连接数
+        default_max_conn = 2
+        #每个db默认的字符集
+        default_charset = "utf8"
+        #限制客户端ip 不配置就不限制
+        client_ip=["192.168.1.%","127.0.0.1"]
+
