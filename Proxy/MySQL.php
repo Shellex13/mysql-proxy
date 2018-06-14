@@ -76,11 +76,11 @@ class MySQL {
     /*
      * Server端关闭或Client端主动关闭，都会触发onClose事件
      */
+
     public function onClose($db) {
         \Logger::log("close with mysql {$this->datasource}");
 
-        $this->usedSize--;
-        $this->table->decr("table_key", $this->datasource);
+        $this->decrUseSize();
 
         //如果此mysql链接在idlePool里面就剔除
         foreach ($this->idlePool as $k => $res) {
@@ -164,12 +164,19 @@ class MySQL {
 
     public function onError($db) {
         if ($db->status === "CONNECT") {
-            $this->usedSize--;
-            $this->table->decr("table_key", $this->datasource);
+           $this->decrUseSize();
         }
         \Logger::log("something error {$db->errCode} db:{$this->datasource}");
         $binaryData = $this->protocol->packErrorData(self::ERROR_QUERY, "something error {$db->errCode}");
         return call_user_func($this->onResult, $binaryData, $db->clientFd);
+    }
+
+    private function decrUseSize() {
+        $this->usedSize--;
+        $this->table->decr("table_key", $this->datasource);
+        if ($this->usedSize < 0) {
+            \Logger::log("expect size >0  db:{$this->datasource} size {$this->usedSize}");
+        }
     }
 
     protected function connect($fd) {
