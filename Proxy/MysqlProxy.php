@@ -133,6 +133,9 @@ class MysqlProxy {
         define("SWOOLE_LOG", $common['swoole_log']);
         define("DAEMON", $common['daemon']);
         define("PORT", $common['port']);
+
+        define("PING_INTERVAL", $common['ping_slave_interval']);
+        define("PING_TIME", $common['ping_slave_time']);
     }
 
     private function getConfigNode() {
@@ -159,7 +162,7 @@ class MysqlProxy {
                 if (isset($value['big_limit'])) {
                     $this->big_limit = (int) $value['big_limit'];
                 }
-                
+
                 $this->RECORD_QUERY = $value['record_query'];
             } else {//nodes
 //                $node = $key;
@@ -421,9 +424,10 @@ class MysqlProxy {
 //        $this->serv->task($logData);
     }
 
-    public function OnResult($binaryData, $fd) {
-        if ($fd == 0) {//ping的返回结果 todo 从库自动恢复 目前只维护连接
-            echo "got\n";
+    public function OnResult($binaryData, $fd, $dataSource) {
+        if ($fd == -1) {//ping的返回结果
+            $this->pool[$dataSource]->clearFailCnt();
+            return;
         }
         if (isset(self::$clients[$fd])) {//有可能已经关闭了
             if (!$this->serv->send($fd, $binaryData)) {
@@ -433,7 +437,6 @@ class MysqlProxy {
             if ($this->RECORD_QUERY) {
                 $end = microtime(true) * 1000;
 
-//                //todo remove
 //                $random = rand(0, 20);
 //                if ($random == 9) {
 //                    $use = $end - self::$clients[$fd]['start'];
@@ -445,7 +448,7 @@ class MysqlProxy {
                     'size' => strlen($binaryData),
                     'time' => $end - self::$clients[$fd]['start'],
                     'sql' => self::$clients[$fd]['sql'],
-                    'datasource' => self::$clients[$fd]['datasource'],
+                    'datasource' => $dataSource,
                     'client_ip' => self::$clients[$fd]['client_ip'],
                 );
                 if ($logData['time'] > $this->slow_limit
@@ -498,28 +501,74 @@ class MysqlProxy {
             $this->localip = $first_ip;
         } else {
             swoole_set_process_name("mysql proxy worker");
-//            $serv->tick(3000, array($this, "OnWorkerTimer")); //自动剔除/恢复 故障从库 && 维持连接
+            $serv->tick(PING_INTERVAL * 1000, array($this, "OnWorkerTimer")); //自动剔除故障从库 && 维持连接
         }
     }
 
-    private function sendPing($config) {
-        $dataSource = $config['host'] . ":" . $config['port'] . ":" . $config['database'];
+    private function removeFromPool($dataSource, $dbName) {
+        try {
+            $this->connectRedis();
+            $this->redis->zadd("fail_node", 0, $dataSource);
+        } catch (\Exception $e) {
+            $this->redis = NULL;
+            \Logger::log("redis error " . $e->getMessage());
+        }
+
+        if (isset($this->targetConfig[$dbName]['slave'])) {
+            //echo "pre down\n";
+//            var_dump($this->targetConfig[$dbName]);
+            foreach ($this->targetConfig[$dbName]['slave'] as $index => $config) {
+                $tSource = $config['host'] . ":" . $config['port'] . ":" . $config['database'];
+                if ($dataSource == $tSource) {
+                    unset($this->targetConfig[$dbName]['slave'][$index]);
+                    foreach ($this->targetConfig[$dbName]['slave_weight_array'] as $windex => $slaveIndex) {
+                        //slave_weight_array 数组$windex是递增索引,$slaveIndex是['slave']中的递增索引
+                        if ($slaveIndex == $index) {
+                            unset($this->targetConfig[$dbName]['slave_weight_array'][$windex]);
+                        }
+                    }
+                    //reset key
+                    $this->targetConfig[$dbName]['slave_weight_array'] = array_merge($this->targetConfig[$dbName]['slave_weight_array'], []);
+                    \Logger::log("Error , {$dataSource} is down! ");
+                    //echo "after down\n";
+//                    var_dump($this->targetConfig[$dbName]);
+                    return;
+                }
+            }
+            \Logger::log("Error ,can not find {$dataSource} in config should not happend");
+        }
+    }
+
+    private function sendPing($dataSource, $dbName) {
         if (isset($this->pool[$dataSource])) {
-            $data = $this->protocol->packPingData();
-            $this->pool[$dataSource]->pinging = true;
-            $this->pool[$dataSource]->query($data, 0); //当前服务的客户端fd为0  证明是proxy主动发出的ping
+            $failCnt = $this->pool[$dataSource]->getFailCnt();
+            if ($failCnt > 0) {
+                \Logger::log("waring {$dataSource} ping fail cnt>0({$failCnt})");
+            }
+            if ($failCnt > PING_TIME) {//剔除从库
+                \Logger::log("remove {$dataSource} from pool $failCnt:" . PING_TIME);
+                $this->removeFromPool($dataSource, $dbName);
+            } else {
+                $data = $this->protocol->packPingData();
+                $this->pool[$dataSource]->ping($data);
+            }
         }
     }
 
     public function OnWorkerTimer($serv) {
+        $sendBitMap = []; //防止从库ip port配置相同
         foreach ($this->targetConfig as $configEntry) {
-            if (isset($configEntry['master'])) {
-                $config = $configEntry['master'];
-                $this->sendPing($config);
-            }
+//            if (isset($configEntry['master'])) {
+//                $config = $configEntry['master'];
+//                $this->sendPing($config);
+//            }
             if (isset($configEntry['slave'])) {
                 foreach ($configEntry['slave'] as $config) {
-                    $this->sendPing($config);
+                    $dataSource = $config['host'] . ":" . $config['port'] . ":" . $config['database'];
+                    if (!isset($sendBitMap[$dataSource])) {
+                        $this->sendPing($dataSource, $config['database']);
+                        $sendBitMap[$dataSource] = 1;
+                    }
                 }
             }
         }
@@ -580,9 +629,8 @@ class MysqlProxy {
                 $this->table->set("table_key", array("request_num_" . $dbname => 0));
                 $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
             }
-            
-            $this->redis->set("proxy_config",\swoole_serialize::pack($this->targetConfig));
-            
+
+            $this->redis->set("proxy_config", \swoole_serialize::pack($this->targetConfig));
         } catch (\Exception $e) {
             $this->redis = NULL;
             \Logger::log("redis error " . $e->getMessage());

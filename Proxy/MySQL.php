@@ -3,7 +3,14 @@
 namespace Proxy;
 
 /*
- * 每个DataSource对应一个MySQL类
+ *               layout
+ *               dbName
+ * 
+ * datasource1  datasource2  datasource3
+ * 
+ * MySql类实例1  MySql类实例2   MySql类实例3
+ * 
+ * n个mysql连接  n个mysql连接   n个mysql连接
  */
 
 class MySQL {
@@ -27,15 +34,15 @@ class MySQL {
     /*
      * 空闲链接
      */
-    public $idlePool = array();
+    private $idlePool = array();
     /*
      * 排队的请求
      */
-    public $taskQueue = array();
+    private $taskQueue = array();
     /*
-     * 是否正在ping 方式主从相同数据源同时ping
+     * 失败ping通次数
      */
-    public $pinging = false;
+    private $pingFailCnt = 0;
 
     /**
      * @var \swoole_table 用于存储连接数汇总信息
@@ -93,7 +100,7 @@ class MySQL {
         //如果不在idel里面
         if ($db->clientFd > 0) {//此链接已经分配给了客户端clietfd>0,则向客户端发送错误信息
             $binaryData = $this->protocol->packErrorData(self::ERROR_CONN, "close with mysql");
-            return call_user_func($this->onResult, $binaryData, $db->clientFd);
+            return call_user_func($this->onResult, $binaryData, $db->clientFd, $this->datasource);
         } else {//proxy 主动close(removeTask) clientFd=0
         }
     }
@@ -105,7 +112,7 @@ class MySQL {
                 $binaryData = $this->protocol->packErrorData(self::ERROR_CONN, $binary['error_msg']);
                 //随后mysql会主动断开连接 回调onclose
                 \Logger::log("连接mysql 失败 {$binary['error_msg']}");
-                call_user_func($this->onResult, $binaryData, $db->clientFd);
+                call_user_func($this->onResult, $binaryData, $db->clientFd, $this->datasource);
                 return;
             }
             $db->status = "AUTH";
@@ -122,7 +129,7 @@ class MySQL {
                 //随后mysql会主动断开连接 回调onclose
                 \Logger::log("连接mysql 失败 $ret {$this->datasource}");
                 $binaryData = $this->protocol->packErrorData(self::ERROR_AUTH, "auth error when connect");
-                call_user_func($this->onResult, $binaryData, $db->clientFd);
+                call_user_func($this->onResult, $binaryData, $db->clientFd, $this->datasource);
             }
         } else {
             $ret = $this->protocol->getResp($data); //todo change name
@@ -130,7 +137,7 @@ class MySQL {
                 case self::RESP_EOF:
                     if (( ++$db->eofCnt) == 2) {//第二次的eof才是[row] eof
                         $db->buffer .= $data;
-                        call_user_func($this->onResult, $db->buffer, $db->clientFd);
+                        call_user_func($this->onResult, $db->buffer, $db->clientFd, $this->datasource);
                         $this->release($db);
                     } else {//pack the [Field] eof data
                         $db->buffer .= $data;
@@ -142,7 +149,7 @@ class MySQL {
                     if ($db->eofCnt == 1) {
                         $db->buffer .= $data;
                     } else {
-                        call_user_func($this->onResult, $data, $db->clientFd);
+                        call_user_func($this->onResult, $data, $db->clientFd, $this->datasource);
                         if ($ret['in_tran'] === 0) {
                             $this->release($db);
                         } else {
@@ -151,7 +158,7 @@ class MySQL {
                     }
                     break;
                 case self::RESP_ERROR:
-                    call_user_func($this->onResult, $data, $db->clientFd);
+                    call_user_func($this->onResult, $data, $db->clientFd, $this->datasource);
                     $this->release($db);
                     break;
 
@@ -164,11 +171,13 @@ class MySQL {
 
     public function onError($db) {
         if ($db->status === "CONNECT") {
-           $this->decrUseSize();
+            $this->decrUseSize();
         }
         \Logger::log("something error {$db->errCode} db:{$this->datasource}");
         $binaryData = $this->protocol->packErrorData(self::ERROR_QUERY, "something error {$db->errCode}");
-        return call_user_func($this->onResult, $binaryData, $db->clientFd);
+        if ($db->clientFd > -1) {//ping 的时候报错了 不回调onResult 让pingFailCnt++
+            return call_user_func($this->onResult, $binaryData, $db->clientFd, $this->datasource);
+        }
     }
 
     private function decrUseSize() {
@@ -206,6 +215,25 @@ class MySQL {
         $db->connect($this->config['host'], $this->config['port'], 10);
     }
 
+    public function ping($data) {
+        $fd = -1; //当前服务的客户端fd为-1  证明是proxy主动发出的请求
+        if (count($this->idlePool) <= 0 && $this->usedSize >= $this->poolSize) {
+            //当slave无可用连接 会没有多余连接来ping  此时要清除cnt  防止多次获取不到连接 剔除从库
+            $this->clearFailCnt();
+            return;
+        }
+        $this->pingFailCnt++;
+        $this->query($data, $fd);
+    }
+
+    public function clearFailCnt() {
+        $this->pingFailCnt = 0;
+    }
+
+    public function getFailCnt() {
+        return $this->pingFailCnt;
+    }
+
     public function query($data, $fd) {
 //        \Logger::log("size pool:{$this->usedSize} {$this->poolSize} $fd");
         if (isset($this->fd2db[$fd])) {//已经分配了连接
@@ -222,7 +250,6 @@ class MySQL {
             $db->eofCnt = 0;
             MysqlProxy::$clients[$fd]['start'] = microtime(true) * 1000;
             $db->send($data); //发送数据到mysql
-            return;
         } else if ($this->usedSize < $this->poolSize) {
             array_push($this->taskQueue, array('fd' => $fd, 'data' => $data));
             $this->connect($fd);
