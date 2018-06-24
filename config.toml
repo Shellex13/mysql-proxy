@@ -37,6 +37,10 @@ slow_limit = 100
 big_limit = 204800
 
 
+#定时侦测从库,间隔(s)
+ping_slave_interval = 1
+#定时侦测从库,次数
+ping_slave_time = 3
 
 
 #mysql数据源配置
