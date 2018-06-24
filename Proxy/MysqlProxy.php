@@ -26,6 +26,7 @@ class MysqlProxy {
      * PROXY的ip 用于proxy集群上报加到key里面
      */
     private $localip = null;
+    private $havePing = false;
 
     /**
      * @var \swoole_table task 和worker之间共享数据用
@@ -134,8 +135,11 @@ class MysqlProxy {
         define("DAEMON", $common['daemon']);
         define("PORT", $common['port']);
 
-        define("PING_INTERVAL", $common['ping_slave_interval']);
-        define("PING_TIME", $common['ping_slave_time']);
+        if (isset($common['ping_slave_interval'])) {
+            define("PING_INTERVAL", $common['ping_slave_interval']);
+            define("PING_TIME", $common['ping_slave_time']);
+            $this->havePing = ture;
+        }
     }
 
     private function getConfigNode() {
@@ -501,7 +505,9 @@ class MysqlProxy {
             $this->localip = $first_ip;
         } else {
             swoole_set_process_name("mysql proxy worker");
-            $serv->tick(PING_INTERVAL * 1000, array($this, "OnWorkerTimer")); //自动剔除故障从库 && 维持连接
+            if ($this->havePing) {
+                $serv->tick(PING_INTERVAL * 1000, array($this, "OnWorkerTimer")); //自动剔除故障从库 && 维持连接
+            }
         }
     }
 
