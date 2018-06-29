@@ -138,7 +138,7 @@ class MysqlProxy {
         if (isset($common['ping_slave_interval'])) {
             define("PING_INTERVAL", $common['ping_slave_interval']);
             define("PING_TIME", $common['ping_slave_time']);
-            $this->havePing = ture;
+            $this->havePing = true;
         }
     }
 
@@ -635,7 +635,7 @@ class MysqlProxy {
                 $this->table->set("table_key", array("request_num_" . $dbname => 0));
                 $this->redis->set("proxy_qps_" . $dbname, $request_num / 3); //总的qps
             }
-
+            var_dump($this->targetConfig);
             $this->redis->set("proxy_config", \swoole_serialize::pack($this->targetConfig));
         } catch (\Exception $e) {
             $this->redis = NULL;
